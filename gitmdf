@@ -126,7 +126,7 @@ class GitMdf
     opts = @notifier.clone
     url = push['repository']['links']['html']['href']
     user = push['repository']['owner']['username']
-    repo = push['repository']['full_name']
+    repo = push['repository']['name']
     push_before = push['push']['changes'][0]['old']['target']['hash']
     push_after = push['push']['changes'][0]['new']['target']['hash']
     opts['link'] = "#{url}/compare/#{push_before}...#{push_after}"
