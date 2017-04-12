@@ -54,13 +54,14 @@ class GitNotifier
   end
 end
 
-class GitDub
+class GitMdf
   def initialize(config)
     @notifier = config['notifier']
     @github = config['github']
-    @silent_init = config['gitdub']['silent_init']
+    @bitbucket = config['bitbucket']
+    @silent_init = config['gitmdf']['silent_init']
 
-    dir = config['gitdub']['directory']
+    dir = config['gitmdf']['directory']
     if dir != '.'
       $logger.info("switching into working directory #{dir}")
       Dir.mkdir(dir) unless Dir.exists?(dir)
@@ -68,7 +69,7 @@ class GitDub
     end
   end
 
-  def process(push)
+  def process_github(push)
     opts = @notifier.clone
     url = push['repository']['url']
     user = push['repository']['owner']['name']
@@ -120,9 +121,64 @@ class GitDub
     end
     $logger.warn("no matching repository found for #{user}/#{repo}")
   end
+
+  def process_bitbucket(push)
+    opts = @notifier.clone
+    url = push['repository']['links']['html']['href']
+    user = push['repository']['owner']['username']
+    repo = push['repository']['full_name']
+    push_before = push['push']['changes'][0]['old']['target']['hash']
+    push_after = push['push']['changes'][0]['new']['target']['hash']
+    opts['link'] = "#{url}/compare/#{push_before}...#{push_after}"
+    $logger.info("received push from #{user}/#{repo} for commits "\
+                 "#{push_before[0..5]}...#{push_after[0..5]}")
+
+    @bitbucket.each do |entry|
+      if "#{user}\/#{repo}" =~ Regexp.new(entry['id'])
+        opts.merge!(entry.reject { |k, v| k == 'id' || k == 'protocol'})
+        opts['uri'] ||= url
+
+        entry['protocol'] ||= 'git'
+        remote = case entry['protocol']
+                 when /git/
+                   "git://bitbucket.org/#{user}/#{repo}.git"
+                 when /ssh/
+                   "git@bitbucket.org:#{user}/#{repo}.git"
+                 when /https/
+                   "https://bitbucket.org/#{user}/#{repo}.git"
+                 else
+                   $logger.error("invalid protocol: #{entry['protocol']}")
+                   next
+                 end
+
+        dir = File.join(user, repo)
+        if not Dir.exists?(dir)
+          $logger.debug("> git clone --bare #{remote} #{dir}")
+          if not system('git', 'clone', '--bare', remote, dir)
+            $logger.error("git failed to clone repository #{user}/#{repo}")
+            FileUtils.rm_rf(dir) if File.exists?(dir)
+            return
+          end
+          # Do not keep empty user directories.
+          if Dir[File.join(user, '*')].empty?
+            Dir.rmdir(user)
+          end
+        end
+
+        state_file = File.join(dir, GitNotifier::STATE_FILE)
+        if @silent_init and not File.exists?(state_file)
+          $logger.info("configuring git-notifer for silent update")
+          opts['updateonly'] = true unless File.exists?(state_file)
+        end
+
+        return GitNotifier.run(dir, opts)
+      end
+    end
+    $logger.warn("no matching repository found for #{user}/#{repo}")
+  end
 end
 
-class GitDubServer < Sinatra::Base
+class GitMdfServer < Sinatra::Base
   configure do
     set(:environment, :production)
     set(:bind, settings.bind)
@@ -130,7 +186,7 @@ class GitDubServer < Sinatra::Base
   end
 
   get '/' do
-    "Use #{request.url} as WebHook URL in your github repository settings."
+    "Use #{request.url} as WebHook URL in your GitHub or BitBucket repository settings."
   end
 
   post '/' do
@@ -140,8 +196,9 @@ class GitDubServer < Sinatra::Base
       return
     end
 
+
     if not params[:payload]
-      $logger.error('received POST request with empty payload')
+      $logger.error('received POST request with empty payload; will try parsing request body')
     else
       json = JSON.parse(params[:payload])
       if not json
@@ -155,9 +212,24 @@ class GitDubServer < Sinatra::Base
         if json['zen']
           $logger.debug('got ping from github')
         else
-          settings.gitdub.process(json)
+          settings.gitmdf.process_github(json)
         end
       end
+    end
+
+    # BitBucket WebHook API issue:
+    # https://bitbucket.org/site/master/issues/11537/webhooks-payload-empty
+    if not params[:payload]
+        request.body.rewind
+        request_payload = request.body.read
+        json = JSON.parse(request_payload)
+        if not json
+            $log.error('received invalid JSON:')
+            STDERR.puts(request_payload)
+        else
+            STDERR.puts(JSON.pretty_generate(json)) if settings.debug_post
+            settings.gitmdf.process_bitbucket(json)
+        end
     end
   end
 end
@@ -171,24 +243,24 @@ def which(cmd)
 end
 
 def run(config)
-  GitDubServer.set(:gitdub, GitDub.new(config))
-  GitDubServer.set(:bind, config['gitdub']['bind'])
-  GitDubServer.set(:port, config['gitdub']['port'])
-  GitDubServer.set(:debug_post, config['gitdub']['debug'])
-  GitDubServer.set(:allowed_sources, config['gitdub']['allowed_sources'])
+  GitMdfServer.set(:gitmdf, GitMdf.new(config))
+  GitMdfServer.set(:bind, config['gitmdf']['bind'])
+  GitMdfServer.set(:port, config['gitmdf']['port'])
+  GitMdfServer.set(:debug_post, config['gitmdf']['debug'])
+  GitMdfServer.set(:allowed_sources, config['gitmdf']['allowed_sources'])
 
-  if not config['gitdub']['ssl']['enable']
-    Sinatra.new(GitDubServer).run!
+  if not config['gitmdf']['ssl']['enable']
+    Sinatra.new(GitMdfServer).run!
   else
     require 'webrick/https'
     require 'openssl'
 
-    cert = File.open(config['gitdub']['ssl']['cert']).read
-    key = File.open(config['gitdub']['ssl']['key']).read
+    cert = File.open(config['gitmdf']['ssl']['cert']).read
+    key = File.open(config['gitmdf']['ssl']['key']).read
     webrick_options = {
-      app:            GitDubServer,
-      BindAddress:    config['gitdub']['bind'],
-      Port:           config['gitdub']['port'],
+      app:            GitMdfServer,
+      BindAddress:    config['gitmdf']['bind'],
+      Port:           config['gitmdf']['port'],
       Logger:         $logger,
       SSLEnable:      true,
       SSLCertificate: OpenSSL::X509::Certificate.new(cert),
@@ -204,7 +276,7 @@ if __FILE__ == $0
   $logger = Logger.new(STDERR)
   $logger.formatter = proc do |severity, datetime, progname, msg|
       time = datetime.strftime('%Y-%m-%d %H:%M:%S')
-      "[#{time}] #{severity}#{' ' * (5 - severity.size + 1)}gitdub | #{msg}\n"
+      "[#{time}] #{severity}#{' ' * (5 - severity.size + 1)} | #{msg}\n"
   end
 
   unless which('git-notifier')
@@ -222,7 +294,7 @@ if __FILE__ == $0
 
   sinatra = Thread.new { run(config) }
 
-  if config['gitdub']['monitor'] > 0
+  if config['gitmdf']['monitor'] > 0
     last_modified = Time.at(0)
     loop do
       mtime = File.mtime(file)
@@ -230,14 +302,14 @@ if __FILE__ == $0
         last_modified = mtime
         $logger.info("re-reading configuration file")
         config = YAML.load_file(file)
-        GitDubServer.set(:gitdub, GitDub.new(config))
-        GitDubServer.set(:debug_post, config['gitdub']['debug'])
-        GitDubServer.set(:allowed_sources, config['gitdub']['allowed_sources'])
-        break if config['gitdub']['monitor'] == 0
+        GitMdfServer.set(:gitmdf, GitMdf.new(config))
+        GitMdfServer.set(:debug_post, config['gitmdf']['debug'])
+        GitMdfServer.set(:allowed_sources, config['gitmdf']['allowed_sources'])
+        break if config['gitmdf']['monitor'] == 0
       end
 
       break unless sinatra.alive?
-      sleep(config['gitdub']['monitor'])
+      sleep(config['gitmdf']['monitor'])
     end
   end
 

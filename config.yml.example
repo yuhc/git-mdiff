@@ -1,4 +1,4 @@
-gitdub:
+gitmdf:
   # The directory where gitdub keeps its per-repository state.
   directory: .gitdub
 
@@ -64,3 +64,14 @@ github:
   #- id: mavam/.*
   #  subject: '[foo]'
   #  to: [vallentin@icir.org]
+
+# The bitbucket configuration. Each entry represents either a single repository
+# or all repositories for a given user/organization name.
+bitbucket:
+  # A basic entry specifying settings for a single repository.
+  - id: yuhc/webhook-test
+    protocol: ssh # Allowed protocols: git (default), ssh, https
+    to: [hyu@cs.utexas.edu]
+    subject: '[git/webhook-test]'
+    # Optional customization of repository URI displayed in email body.
+    uri: git@bitbucket.org:yuhc/webhook-test.git
