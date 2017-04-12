@@ -1,10 +1,11 @@
-gitdub
-======
+git-mdiff
+=========
 
-**gitdub** is a [github web-hook][post-receive-hook] that converts a
-changeset pushed into one email per change via [git-notifier][git-notifier].
-Unlike the existing github email hook, gitdub sends out detailed diffs for each
-change.
+**Git-mdiff** is a web-hook service based on **gitdub**. Gitdub is a
+[github web-hook][post-receive-hook] that converts a changeset pushed
+into one email per change via [git-notifier][git-notifier].
+Beyond gitdub, git-mdiff also supports BitBucket. It sends out detailed
+diffs for each push on GitHub or BitBucket repositories.
 
 Setup
 =====
@@ -17,24 +18,41 @@ Dependencies
   - `gem install sinatra`
   - [git-notifier][git-notifier] (master branch required)
 
+The following packages are required to run git-notifier:
+
+  - `pip install pygithub`
+  - sendmail (requires port 25 or 587 by default)
+  - add `/path/to/git-notifier` to `$PATH`
+
 Installation
 ------------
 
-  1. `cp gitdub /path/to/dir/in/$PATH`
+  1. add `/path/to/gitmdf` to `$PATH`
   1. `cp config.yml.example config.yml`
-  1. `gitdub config.yml`
+  1. `gitmdf config.yml`
 
-Integration with github
+Integration with GitHub
 -----------------------
 
   1. Navigate to a repository you own, e.g., `https://github.com/user/repo`
   1. Click on *Settings* in the right sidebar
   1. Click on *Webhooks & Services* in the left sidebar
   1. Click on *Add Webhook*
-  1. Enter the URL to reach gitdub, e.g., `http://gitdub.mydomain.com:8888/`
+  1. Enter the URL to reach gitmdf, e.g., `http://gitmdf.mydomain.com:8888/`
   1. Set the content type to `application/x-www-from-urlencoded`
   1. Select the radio button *Just the `push` event*
   1. Click on the green *Add Webhook* button
+
+Integration with GitHub
+-----------------------
+
+  1. Similar to GitHub. Only support PUSH trigger.
+
+Protocols
+---------
+
+If ssh-key is required to visit the repository, please generate a key to
+GitHub or BitBucket first.
 
 Customizing
 ===========
@@ -98,6 +116,7 @@ Licence
 =======
 
 Gitdub comes with a BSD license, please see COPYING for details.
+Git-mdiff follows the same license.
 
 [git-notifier]: http://www.icir.org/robin/git-notifier
 [sinatra]: http://www.sinatrarb.com
