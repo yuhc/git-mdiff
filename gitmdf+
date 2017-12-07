@@ -1,0 +1,304 @@
+#!/usr/bin/env ruby
+
+require 'fileutils'
+require 'json'
+require 'logger'
+require 'sinatra/base'
+require 'yaml'
+require 'net/http'
+require 'uri'
+
+
+class GitNotifier
+  STATE_FILE = '.git-notifier.dat'
+
+  private
+
+  MAPPINGS = {
+    'from' => 'sender',
+    'to' => 'mailinglist',
+    'subject' => 'emailprefix',
+    'uri' => 'repouri'
+  }
+
+  public
+
+  def self.run(path, opts)
+    args = Hash[opts.map { |k, v| [MAPPINGS[k] || k, v] }]
+    success = execute(path, args)
+    $logger.error('git-notifier failed') unless success
+    success
+  end
+
+  private
+
+  def self.execute(path, args = [])
+    args = args.map do |k, v|
+      v = v * ',' if k == 'mailinglist'
+      next unless v
+      ["--#{k}"] + (!!v == v ? [] : ["#{v}"]) # Ignore non-boolean values.
+    end
+    success = true
+    begin
+      args = args.flatten.delete_if { |x| x.nil? }
+      $logger.debug("> git-notifier #{args}")
+      success = system('git-notifier', *args)
+      raise "git-notifier failed in #{path} with args: #{args}" unless success
+    rescue Exception => e
+      $logger.error(e)
+    end
+    success
+  end
+end
+
+class GitMdf
+  def initialize(config)
+    @notifier = config['notifier']
+    @github = config['github']
+    @bitbucket = config['bitbucket']
+    @silent_init = config['gitmdf']['silent_init']
+    @password = config['password']
+
+    dir = config['gitmdf']['directory']
+    if dir != '.'
+      $logger.info("switching into working directory #{dir}")
+      Dir.mkdir(dir) unless Dir.exists?(dir)
+      Dir.chdir(dir)
+    end
+  end
+
+  def process_github(push)
+    opts = @notifier.clone
+    url = push['repository']['url']
+    user = push['repository']['owner']['name']
+    repo = push['repository']['name']
+    opts['link'] = "#{url}/compare/#{push['before']}...#{push['after']}"
+    $logger.info("received push from #{user}/#{repo} for commits "\
+                 "#{push['before'][0..5]}...#{push['after'][0..5]}")
+
+    @github.each do |entry|
+      if "#{user}\/#{repo}" =~ Regexp.new(entry['id'])
+        opts.merge!(entry.reject { |k, v| k == 'id' || k == 'protocol'})
+        opts['uri'] ||= url
+
+        entry['protocol'] ||= 'git'
+        remote = case entry['protocol']
+                 when /git/
+                   "git://github.com/#{user}/#{repo}.git"
+                 when /ssh/
+                   "git@github.com:#{user}/#{repo}.git"
+                 when /https/
+                   "https://github.com/#{user}/#{repo}.git"
+                 else
+                   $logger.error("invalid protocol: #{entry['protocol']}")
+                   next
+                 end
+
+        dir = File.join(user, repo)
+        if not Dir.exists?(dir)
+          $logger.debug("> git clone --bare #{remote} #{dir}")
+          if not system('git', 'clone', '--bare', remote, dir)
+            $logger.error("git failed to clone repository #{user}/#{repo}")
+            FileUtils.rm_rf(dir) if File.exists?(dir)
+            return
+          end
+          # Do not keep empty user directories.
+          if Dir[File.join(user, '*')].empty?
+            Dir.rmdir(user)
+          end
+        end
+
+        state_file = File.join(dir, GitNotifier::STATE_FILE)
+        if @silent_init and not File.exists?(state_file)
+          $logger.info("configuring git-notifer for silent update")
+          opts['updateonly'] = true unless File.exists?(state_file)
+        end
+
+        return GitNotifier.run(dir, opts)
+      end
+    end
+    $logger.warn("no matching repository found for #{user}/#{repo}")
+  end
+
+  def process_bitbucket(push)
+    opts = @notifier.clone
+    url = push['repository']['links']['html']['href']
+    user = push['repository']['owner']['username']
+    repo = push['repository']['name']
+    push_before = push['push']['changes'][0]['old']['target']['hash']
+    push_after = push['push']['changes'][0]['new']['target']['hash']
+    opts['link'] = "#{url}/compare/#{push_before}...#{push_after}"
+    $logger.info("received push from #{user}/#{repo} for commits "\
+                 "#{push_before[0..5]}...#{push_after[0..5]}")
+
+    @bitbucket.each do |entry|
+      if "#{user}\/#{repo}" =~ Regexp.new(entry['id'])
+        opts.merge!(entry.reject { |k, v| k == 'id' || k == 'protocol'})
+        opts['uri'] ||= url
+
+        entry['protocol'] ||= 'git'
+
+        dir = File.join(user, repo)
+        url = "https://api.bitbucket.org/2.0/repositories/#{dir}/diff/"\
+              "#{push_after}..#{push_before}"
+        uri = URI.parse(url);
+
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = true
+        request = Net::HTTP::Get.new(uri.request_uri)
+        request["Content-Type"] = "application/json"
+        request.basic_auth(user, @password['bitbucket'])
+
+        response = http.request(request)
+        $logger.debug("> REST API returns #{response.code}")
+
+        if response.code == '200'
+          opts['content'] = response.body
+        else
+          opts['content'] = "The diff was too large and timed out.\n"
+        end
+
+        return GitNotifier.run(dir, opts)
+      end
+    end
+    $logger.warn("no matching repository found for #{user}/#{repo}")
+  end
+end
+
+class GitMdfServer < Sinatra::Base
+  configure do
+    set(:environment, :production)
+    set(:bind, settings.bind)
+    set(:port, settings.port)
+  end
+
+  get '/' do
+    "Use #{request.url} as WebHook URL in your GitHub or BitBucket repository settings."
+  end
+
+  post '/' do
+    sources = settings.allowed_sources
+    if not sources.empty? and not sources.include?(request.ip)
+      $logger.info("discarding request from disallowed address #{request.ip}")
+      return
+    end
+
+
+    if not params[:payload]
+      $logger.error('received POST request with empty payload; will try parsing request body')
+    else
+      json = JSON.parse(params[:payload])
+      if not json
+        $log.error('received invalid JSON:')
+        STDERR.puts(params[:payload])
+      else
+        STDERR.puts(JSON.pretty_generate(json)) if settings.debug_post
+        # Ideally we'd use the X-Github-Event header to distinguish a ping from
+        # an ordinary push. However, the 'headers' variable in Sinatra only
+        # contains Content-Type, so we introspect the JSON instead.
+        if json['zen']
+          $logger.debug('got ping from github')
+        else
+          settings.gitmdf.process_github(json)
+        end
+      end
+    end
+
+    # BitBucket WebHook API issue:
+    # https://bitbucket.org/site/master/issues/11537/webhooks-payload-empty
+    if not params[:payload]
+        request.body.rewind
+        request_payload = request.body.read
+        json = JSON.parse(request_payload)
+        if not json
+            $log.error('received invalid JSON:')
+            STDERR.puts(request_payload)
+        else
+            STDERR.puts(JSON.pretty_generate(json)) if settings.debug_post
+            settings.gitmdf.process_bitbucket(json)
+        end
+    end
+  end
+end
+
+def which(cmd)
+  ENV['PATH'].split(File::PATH_SEPARATOR).each do |path|
+    exe = "#{path}/#{cmd}"
+    return exe if File.executable?(exe)
+  end
+  nil
+end
+
+def run(config)
+  GitMdfServer.set(:gitmdf, GitMdf.new(config))
+  GitMdfServer.set(:bind, config['gitmdf']['bind'])
+  GitMdfServer.set(:port, config['gitmdf']['port'])
+  GitMdfServer.set(:debug_post, config['gitmdf']['debug'])
+  GitMdfServer.set(:allowed_sources, config['gitmdf']['allowed_sources'])
+
+  if not config['gitmdf']['ssl']['enable']
+    Sinatra.new(GitMdfServer).run!
+  else
+    require 'webrick/https'
+    require 'openssl'
+
+    cert = File.open(config['gitmdf']['ssl']['cert']).read
+    key = File.open(config['gitmdf']['ssl']['key']).read
+    webrick_options = {
+      app:            GitMdfServer,
+      BindAddress:    config['gitmdf']['bind'],
+      Port:           config['gitmdf']['port'],
+      Logger:         $logger,
+      SSLEnable:      true,
+      SSLCertificate: OpenSSL::X509::Certificate.new(cert),
+      SSLPrivateKey:  OpenSSL::PKey::RSA.new(key),
+      SSLCertName:    [['CN', WEBrick::Utils::getservername]]
+    }
+
+    Rack::Server.start(webrick_options)
+  end
+end
+
+if __FILE__ == $0
+  $logger = Logger.new(STDERR)
+  $logger.formatter = proc do |severity, datetime, progname, msg|
+      time = datetime.strftime('%Y-%m-%d %H:%M:%S')
+      "[#{time}] #{severity}#{' ' * (5 - severity.size + 1)} | #{msg}\n"
+  end
+
+  unless which('git-notifier')
+    $logger.error('could not find git-notifier in $PATH')
+    exit 1
+  end
+
+  if ARGV.size() != 1
+    STDERR.puts "usage: #{$0} <config.yml>"
+    exit 1
+  end
+
+  file = File.absolute_path(ARGV[0])
+  config = YAML.load_file(file)
+
+  sinatra = Thread.new { run(config) }
+
+  if config['gitmdf']['monitor'] > 0
+    last_modified = Time.at(0)
+    loop do
+      mtime = File.mtime(file)
+      if mtime > last_modified
+        last_modified = mtime
+        $logger.info("re-reading configuration file")
+        config = YAML.load_file(file)
+        GitMdfServer.set(:gitmdf, GitMdf.new(config))
+        GitMdfServer.set(:debug_post, config['gitmdf']['debug'])
+        GitMdfServer.set(:allowed_sources, config['gitmdf']['allowed_sources'])
+        break if config['gitmdf']['monitor'] == 0
+      end
+
+      break unless sinatra.alive?
+      sleep(config['gitmdf']['monitor'])
+    end
+  end
+
+  sinatra.join
+end
