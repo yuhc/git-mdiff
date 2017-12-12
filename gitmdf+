@@ -47,7 +47,6 @@ class GitNotifier
                    "#{args['message']}\n"\
                    "\n>---------------------------------------------------------------\n\n"\
                    "#{args['content']}"
-      $logger.debug("#{mail_content}")
 
       return mail_content
   end
@@ -164,29 +163,38 @@ class GitMdf
     @bitbucket.each do |entry|
       if "#{user}\/#{repo}" =~ Regexp.new(entry['id'])
         opts.merge!(entry.reject { |k, v| k == 'id' || k == 'protocol'})
-        opts['uri'] ||= url
-		opts['author'] ||= push['push']['changes'][0]['new']['target']['author']['raw']
-		opts['commit_hash'] ||= push_after
-		opts['date'] ||= push['push']['changes'][0]['new']['target']['date']
-		opts['message'] ||= push['push']['changes'][0]['new']['target']['message']
-		opts['branch'] ||= push['push']['changes'][0]['new']['name']
 
-        entry['protocol'] ||= 'git'
+        push['push']['changes'][0]['commits'].each do |commit|
+          entry['protocol'] ||= 'git'
+          opts['uri'] ||= url
+          opts['branch'] ||= push['push']['changes'][0]['new']['name']
+          opts['author'] = commit['author']['raw']
+          opts['commit_hash'] = commit['hash']
+          opts['date'] = commit['date']
+          opts['message'] = commit['message']
 
-        dir = File.join(user, repo)
-        url = "https://api.bitbucket.org/2.0/repositories/#{dir}/diff/"\
-              "#{push_after}..#{push_before}"
-        response = rest_bitbucket(url, user);
-        $logger.debug("> REST API returns #{response.code}")
+          dir = File.join(user, repo)
+          # merge node is not supported correctly yet
+          url = "https://api.bitbucket.org/2.0/repositories/#{dir}/diff/"\
+                "#{commit['hash']}..#{commit['parents'][0]['hash']}"
+          response = rest_bitbucket(url, user);
+          $logger.debug("> REST API returns #{response.code} for commit "\
+                        "#{commit['hash']}")
 
-        if response.code == '200'
-          opts['content'] = response.body
-        else
-          opts['content'] = "Something is committed but it is too large "\
-                            "for me to diff :(\n"
+          if response.code == '200'
+            opts['content'] = response.body
+          else
+            opts['content'] = "Something is committed but it is too large "\
+                              "for me to diff :(\n"
+          end
+
+          ret_code = GitNotifier.run(dir, opts)
+          if ret_code != true
+            return ret_code
+          end
         end
 
-        return GitNotifier.run(dir, opts)
+        return true
       end
     end
     $logger.warn("no matching repository found for #{user}/#{repo}")
