@@ -32,18 +32,33 @@ class GitNotifier
 
   private
 
+  def self.makemail(args = [])
+      $logger.debug("#{args}")
+      mail_content = "Subject: #{args['emailprefix']} #{args['message'].lines.first.rstrip!}\n"\
+                   "From: #{args['sender']}\n"\
+                   "To: #{args['mailinglist'].join(",")}\n\n"\
+                   "Repository: #{args['repouri']}\n"\
+                   "On branch: #{args['branch']}\n"\
+                   "Link: #{args['link']}\n"\
+                   "\n>---------------------------------------------------------------\n\n"\
+                   "Commit: #{args['commit_hash']}\n"\
+                   "Author: #{args['author']}\n"\
+                   "Date: #{args['date']}\n\n"\
+                   "#{args['message']}\n"\
+                   "\n>---------------------------------------------------------------\n\n"\
+                   "#{args['content']}"
+      $logger.debug("#{mail_content}")
+
+      return mail_content
+  end
+
   def self.execute(path, args = [])
-    args = args.map do |k, v|
-      v = v * ',' if k == 'mailinglist'
-      next unless v
-      ["--#{k}"] + (!!v == v ? [] : ["#{v}"]) # Ignore non-boolean values.
-    end
+    mail_content = makemail(args)
     success = true
     begin
-      args = args.flatten.delete_if { |x| x.nil? }
-      $logger.debug("> git-notifier #{args}")
-      success = system('git-notifier', *args)
-      raise "git-notifier failed in #{path} with args: #{args}" unless success
+      success = system("echo #{mail_content.dump} | "\
+                       "/usr/sbin/sendmail #{args['mailinglist'].join(",")}")
+      raise "sendmail failed in #{path} with args: #{args}" unless success
     rescue Exception => e
       $logger.error(e)
     end
@@ -94,6 +109,8 @@ class GitMdf
                    next
                  end
 
+        # https://developer.github.com/v3/auth/#basic-authentication
+
         dir = File.join(user, repo)
         if not Dir.exists?(dir)
           $logger.debug("> git clone --bare #{remote} #{dir}")
@@ -120,6 +137,19 @@ class GitMdf
     $logger.warn("no matching repository found for #{user}/#{repo}")
   end
 
+  def rest_bitbucket(url, user)
+    uri = URI.parse(url);
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    request = Net::HTTP::Get.new(uri.request_uri)
+    request["Content-Type"] = "application/json"
+    request.basic_auth(user, @password['bitbucket'])
+
+    response = http.request(request)
+    return response
+  end
+
   def process_bitbucket(push)
     opts = @notifier.clone
     url = push['repository']['links']['html']['href']
@@ -135,27 +165,25 @@ class GitMdf
       if "#{user}\/#{repo}" =~ Regexp.new(entry['id'])
         opts.merge!(entry.reject { |k, v| k == 'id' || k == 'protocol'})
         opts['uri'] ||= url
+		opts['author'] ||= push['push']['changes'][0]['new']['target']['author']['raw']
+		opts['commit_hash'] ||= push_after
+		opts['date'] ||= push['push']['changes'][0]['new']['target']['date']
+		opts['message'] ||= push['push']['changes'][0]['new']['target']['message']
+		opts['branch'] ||= push['push']['changes'][0]['new']['name']
 
         entry['protocol'] ||= 'git'
 
         dir = File.join(user, repo)
         url = "https://api.bitbucket.org/2.0/repositories/#{dir}/diff/"\
               "#{push_after}..#{push_before}"
-        uri = URI.parse(url);
-
-        http = Net::HTTP.new(uri.host, uri.port)
-        http.use_ssl = true
-        request = Net::HTTP::Get.new(uri.request_uri)
-        request["Content-Type"] = "application/json"
-        request.basic_auth(user, @password['bitbucket'])
-
-        response = http.request(request)
+        response = rest_bitbucket(url, user);
         $logger.debug("> REST API returns #{response.code}")
 
         if response.code == '200'
           opts['content'] = response.body
         else
-          opts['content'] = "The diff was too large and timed out.\n"
+          opts['content'] = "Something is committed but it is too large "\
+                            "for me to diff :(\n"
         end
 
         return GitNotifier.run(dir, opts)
