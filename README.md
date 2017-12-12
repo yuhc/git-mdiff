@@ -7,6 +7,10 @@ into one email per change via [git-notifier][git-notifier].
 Beyond gitdub, git-mdiff also supports BitBucket. It sends out detailed
 diffs for each push on GitHub or BitBucket repositories.
 
+Another mod version, **git-mdiff+**, is based on REST APIs of GitHub
+and BitBucket. It does not rely on git-notifier but requires an application
+password/token generated from the websites.
+
 Setup
 =====
 
