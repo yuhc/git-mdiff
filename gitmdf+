@@ -177,15 +177,19 @@ class GitMdf
           # merge node is not supported correctly yet
           url = "https://api.bitbucket.org/2.0/repositories/#{dir}/diff/"\
                 "#{commit['hash']}..#{commit['parents'][0]['hash']}"
-          response = rest_bitbucket(url, user);
-          $logger.debug("> REST API returns #{response.code} for commit "\
-                        "#{commit['hash']}")
 
-          if response.code == '200'
-            opts['content'] = response.body
-          else
-            opts['content'] = "Something is committed but it is too large "\
-                              "for me to diff :(\n"
+          for tries in [1..3]
+            response = rest_bitbucket(url, user);
+            $logger.debug("> REST API returns #{response.code} for commit "\
+                          "#{commit['hash']}")
+
+            if response.code == '200'
+              opts['content'] = response.body
+              break
+            else
+              opts['content'] = "Something was committed but I failed to pull "\
+                                "the info for error #{response.code} :(\n"
+            end
           end
 
           ret_code = GitNotifier.run(dir, opts)
