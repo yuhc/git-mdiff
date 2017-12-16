@@ -38,10 +38,14 @@ gitmdf:
   # port, and ssl.
   monitor: 0
 
-password:
+account:
   # App password or access token with permission to read repositories
-  bitbucket: PUT_APP_PASSWORD_HERE
-  github: PUT_ACCESS_TOKEN_HERE
+  bitbucket:
+    user: PUT_USER_NAME_HERE
+    token: PUT_APP_PASSWORD_HERE
+  github:
+    user: PUT_USER_NAME_HERE
+    token: PUT_ACCESS_TOKEN_HERE
 
 notifier:
   # The email sender. (Can be overriden for each repository.)
