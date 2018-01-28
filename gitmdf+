@@ -25,7 +25,13 @@ class GitNotifier
 
   def self.run(path, opts)
     args = Hash[opts.map { |k, v| [MAPPINGS[k] || k, v] }]
-    success = execute(path, args)
+    if opts['github'] == true
+        args.delete('github');
+        success = pull_execute(path, args)
+    else
+        args.delete('github');
+        success = execute(path, args)
+    end
     $logger.error('git-notifier failed') unless success
     success
   end
@@ -61,6 +67,32 @@ class GitNotifier
     rescue Exception => e
       $logger.error(e)
     end
+    success
+  end
+
+  def self.pull_execute(path, args = [])
+    args = args.map do |k, v|
+      v = v * ',' if k == 'mailinglist'
+      next unless v
+      ["--#{k}"] + (!!v == v ? [] : ["#{v}"]) # Ignore non-boolean values.
+    end
+    current = Dir.pwd()
+    success = true
+    Dir.chdir(path)
+    begin
+      $logger.debug('> git fetch origin +refs/heads/*:refs/heads/*')
+      success = system('git', 'fetch', 'origin', '+refs/heads/*:refs/heads/*')
+      raise "git fetch failed in #{path}" unless success
+      args = args.flatten.delete_if { |x| x.nil? }
+      $logger.debug("> git-notifier #{args}")
+
+      # TODO: call sendmail directly instead of git-notifier
+      success = system('git-notifier', *args)
+      raise "git-notifier failed in #{path} with args: #{args}" unless success
+    rescue Exception => e
+      $logger.error(e)
+    end
+    Dir.chdir(current)
     success
   end
 end
@@ -130,6 +162,7 @@ class GitMdf
           opts['updateonly'] = true unless File.exists?(state_file)
         end
 
+        opts['github'] = true
         return GitNotifier.run(dir, opts)
       end
     end
@@ -193,6 +226,7 @@ class GitMdf
             end
           end
 
+          opts['github'] = false
           ret_code = GitNotifier.run(dir, opts)
           if ret_code != true
             return ret_code
