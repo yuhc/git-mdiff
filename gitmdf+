@@ -218,7 +218,8 @@ class GitMdf
                           "#{commit['hash']}")
 
             if response.code == '200'
-              opts['content'] = response.body
+              opts['content'] = response.body.gsub(/(?<=GIT\sbinary\spatch).*(?=\n\n)/m, '')
+              opts['content'].concat("Commit contains binary; content may be incomplete\n")
               break
             else
               opts['content'] = "Something was committed but I failed to pull "\
