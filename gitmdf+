@@ -58,7 +58,7 @@ class GitNotifier
   end
 
   def self.execute(path, args = [])
-    mail_content = makemail(args)
+    mail_content = makemail(args).dump[1...-1]
     success = true
     begin
       success = system("echo #{mail_content.dump} | "\
@@ -219,7 +219,9 @@ class GitMdf
 
             if response.code == '200'
               opts['content'] = response.body.gsub(/(?<=GIT\sbinary\spatch).*(?=\n\n)/m, '')
-              opts['content'].concat("Commit contains binary; content may be incomplete\n")
+              if opts['content'] != response.body
+                  opts['content'].concat("Commit contains binary; content may be incomplete\n")
+              end
               break
             else
               opts['content'] = "Something was committed but I failed to pull "\
