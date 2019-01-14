@@ -39,7 +39,11 @@ class GitNotifier
   private
 
   def self.makemail(args = [])
-      $logger.debug("#{args}")
+      $file_logger.debug("#{args}")
+      no_content_args = {}.merge(args)
+      no_content_args.delete('content')
+      $logger.debug("#{no_content_args}")
+
       mail_content = "Subject: #{args['emailprefix']} #{args['message'].lines.first.rstrip!}\n"\
                    "From: #{args['sender']}\n"\
                    "To: #{args['mailinglist'].join(",")}\n\n"\
@@ -340,6 +344,12 @@ end
 if __FILE__ == $0
   $logger = Logger.new(STDERR)
   $logger.formatter = proc do |severity, datetime, progname, msg|
+      time = datetime.strftime('%Y-%m-%d %H:%M:%S')
+      "[#{time}] #{severity}#{' ' * (5 - severity.size + 1)} | #{msg}\n"
+  end
+
+  $file_logger = Logger.new('commits.log', 10, 1024000)
+  $file_logger.formatter = proc do |severity, datetime, progname, msg|
       time = datetime.strftime('%Y-%m-%d %H:%M:%S')
       "[#{time}] #{severity}#{' ' * (5 - severity.size + 1)} | #{msg}\n"
   end
