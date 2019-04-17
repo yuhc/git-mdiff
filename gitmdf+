@@ -7,6 +7,7 @@ require 'sinatra/base'
 require 'yaml'
 require 'net/http'
 require 'uri'
+require 'shellwords'
 
 
 class GitNotifier
@@ -65,7 +66,7 @@ class GitNotifier
     mail_content = makemail(args).dump[1...-1]
     success = true
     begin
-      success = system("echo #{mail_content.dump} | "\
+      success = system("echo #{Shellwords.escape(mail_content)} | "\
                        "/usr/sbin/sendmail #{args['mailinglist'].join(",")}")
       raise "sendmail failed in #{path} with args: #{args}" unless success
     rescue Exception => e
@@ -232,6 +233,9 @@ class GitMdf
                                 "the info for error #{response.code} :(\n"
             end
           end
+
+          # escape content to safely use with shell
+          #opts['content'] = Shellwords.escape(opts['content'])
 
           opts['github'] = false
           ret_code = GitNotifier.run(dir, opts)
