@@ -115,6 +115,16 @@ filtering in gitdub by setting the following configuration option:
 
     allowed_sources: [207.97.227.253, 50.57.128.197, 108.171.174.178]
 
+Sendmail by Gmail
+-----------------
+
+I personally use Gmail for sending commit emails to avoid setting up the
+email server by myself. To configure Gmail as the sendmail email relay,
+please reference
+[Configuring Gmail as a Sendmail email relay](https://linuxconfig.org/configuring-gmail-as-sendmail-email-relay).
+If you got the `5.5.1 Authentication Required` error,
+please [enable the less secure apps](https://www.google.com/settings/security/lesssecureapps)
+and [allow access from a different timezone/IP](https://g.co/allowaccess).
 
 Licence
 =======
