@@ -8,6 +8,7 @@ require 'yaml'
 require 'net/http'
 require 'uri'
 require 'shellwords'
+require 'ipaddr'
 
 
 class GitNotifier
@@ -267,9 +268,19 @@ class GitMdfServer < Sinatra::Base
 
   post '/' do
     sources = settings.allowed_sources
-    if not sources.empty? and not sources.include?(request.ip)
-      $logger.info("discarding request from disallowed address #{request.ip}")
-      return
+    source_permit = false
+    if not sources.empty?
+      for allowed_ip in sources
+        allow = IPAddr.new(allowed_ip).include?(request.ip)
+        if allow
+          source_permit = true
+          break
+        end
+      end
+      if not source_permit
+        $logger.info("discarding request from disallowed address #{request.ip}")
+        return
+      end
     end
 
 
