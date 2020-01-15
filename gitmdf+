@@ -129,7 +129,7 @@ class GitMdf
                  "#{push['before'][0..5]}...#{push['after'][0..5]}")
 
     @github.each do |entry|
-      if "#{user}\/#{repo}" =~ Regexp.new(entry['id'])
+      if "#{user}\/#{repo}" =~ Regexp.new(entry['id'] + '$', Regexp::MULTILINE)
         opts.merge!(entry.reject { |k, v| k == 'id' || k == 'protocol'})
         opts['uri'] ||= url
 
