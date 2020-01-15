@@ -283,6 +283,15 @@ class GitMdfServer < Sinatra::Base
       end
     end
 
+    blacklist_domains = settings.blacklist_domains
+    if not blacklist_domains.empty?
+        for bad_domain in blacklist_domains
+            if request.url.include?(bad_domain)
+                $logger.info("discarding request from blacklist domain #{request.url}")
+                return
+            end
+        end
+    end
 
     if not params[:payload]
       $logger.error('received POST request with empty payload; will try parsing request body')
@@ -335,6 +344,7 @@ def run(config)
   GitMdfServer.set(:port, config['gitmdf']['port'])
   GitMdfServer.set(:debug_post, config['gitmdf']['debug'])
   GitMdfServer.set(:allowed_sources, config['gitmdf']['allowed_sources'])
+  GitMdfServer.set(:blacklist_domains, config['gitmdf']['blacklist_domains'])
 
   if not config['gitmdf']['ssl']['enable']
     Sinatra.new(GitMdfServer).run!
@@ -398,6 +408,7 @@ if __FILE__ == $0
         GitMdfServer.set(:gitmdf, GitMdf.new(config))
         GitMdfServer.set(:debug_post, config['gitmdf']['debug'])
         GitMdfServer.set(:allowed_sources, config['gitmdf']['allowed_sources'])
+        GitMdfServer.set(:blacklist_domains, config['gitmdf']['blacklist_domains'])
         break if config['gitmdf']['monitor'] == 0
       end
 

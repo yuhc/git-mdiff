@@ -28,6 +28,9 @@ gitmdf:
   #
   allowed_sources: []
 
+  # Block requests from specific domains.
+  blacklist_domains: []
+
   # Flag that determines whether the first arriving data results in sending
   # emails. If false, gitdub sends out an email for every single commit since
   # the repository creation. If true, the first arriving data only marks all
