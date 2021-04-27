@@ -268,8 +268,8 @@ class GitMdfServer < Sinatra::Base
 
   post '/' do
     sources = settings.allowed_sources
-    source_permit = false
-    if not sources.empty?
+    if not sources.nil? and not sources.empty?
+      source_permit = false
       for allowed_ip in sources
         allow = IPAddr.new(allowed_ip).include?(request.ip)
         if allow
@@ -284,7 +284,7 @@ class GitMdfServer < Sinatra::Base
     end
 
     blacklist_domains = settings.blacklist_domains
-    if not blacklist_domains.empty?
+    if not blacklist_domains.nil? and not blacklist_domains.empty?
         for bad_domain in blacklist_domains
             if request.url.include?(bad_domain)
                 $logger.info("discarding request from blacklist domain #{request.url}")
