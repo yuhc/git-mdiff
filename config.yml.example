@@ -21,10 +21,11 @@ gitmdf:
   # Only process POST requests from the these IP addresses (optioanl). If empty
   # or not set, gitdub processes requests from all addresses.
   #
+  # Gitdub automatically adds GitHub and BitBucket server IPs to allowed_sources.
   # Github: https://api.github.com/meta
-  # Bitbucket: https://bitbucket.org/blog/new-outbound-ip-addresses-webhooks-2
-  #            https://bitbucket.org/blog/new-ip-addresses-bitbucket-cloud
-  #allowed_sources: [207.97.227.253, 50.57.128.197, 108.171.174.178]
+  # Bitbucket: https://ip-ranges.atlassian.com
+  #
+  # allowed_sources: [207.97.227.253, 50.57.128.197, 108.171.174.178]
   #
   allowed_sources: []
 

@@ -9,6 +9,7 @@ require 'net/http'
 require 'uri'
 require 'shellwords'
 require 'ipaddr'
+require_relative 'server_ip_ranges'
 
 
 class GitNotifier
@@ -394,6 +395,13 @@ if __FILE__ == $0
 
   file = File.absolute_path(ARGV[0])
   config = YAML.load_file(file)
+
+  # Append GitHub and BitBucket IP ranges
+  github_ips = github_ip_ranges()
+  bitbucket_ips = bitbucket_ip_ranges()
+  $logger.info("Append GitHub allow list: #{github_ips}")
+  $logger.info("Append BitBucket allow list: #{bitbucket_ips}")
+  config['gitmdf']['allowed_sources'] = (config['gitmdf']['allowed_sources'] + github_ips + bitbucket_ips).uniq
 
   sinatra = Thread.new { run(config) }
 
