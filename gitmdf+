@@ -10,6 +10,7 @@ require 'uri'
 require 'shellwords'
 require 'ipaddr'
 require_relative 'server_ip_ranges'
+require_relative 'sliding_window'
 
 
 class GitNotifier
@@ -108,7 +109,9 @@ class GitMdf
   def initialize(config)
     @notifier = config['notifier']
     @github = config['github']
+    @github_recent_commits = RecentCommits.new(config['gitmdf']['commit_record_timespan'])
     @bitbucket = config['bitbucket']
+    @bitbucket_recent_commits = RecentCommits.new(config['gitmdf']['commit_record_timespan'])
     @silent_init = config['gitmdf']['silent_init']
     @account = config['account']
 
@@ -168,6 +171,14 @@ class GitMdf
           $logger.info("configuring git-notifer for silent update")
           opts['updateonly'] = true unless File.exists?(state_file)
         end
+
+        # check duplicates
+        if @github_recent_commits.has(url, push['after'])
+          $logger.info("ignore duplicated request from #{url} for commit "\
+                       "#{commit['hash']}")
+          next
+        end
+        @github_recent_commits.add(url, push['after'])
 
         opts['github'] = true
         return GitNotifier.run(dir, opts)
@@ -239,8 +250,13 @@ class GitMdf
             end
           end
 
-          # escape content to safely use with shell
-          #opts['content'] = Shellwords.escape(opts['content'])
+          # check duplicates
+          if @bitbucket_recent_commits.has(url, commit['hash'])
+            $logger.info("ignore duplicated request from #{url} for commit "\
+                         "#{commit['hash']}")
+            next
+          end
+          @bitbucket_recent_commits.add(url, commit['hash'])
 
           opts['github'] = false
           ret_code = GitNotifier.run(dir, opts)

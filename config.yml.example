@@ -44,6 +44,10 @@ gitmdf:
   # port, and ssl.
   monitor: 0
 
+  # The timespan in seconds for recorded commits in a sliding window, used for
+  # de-duplicating the requests.
+  commit_record_timespan: 1800
+
 account:
   # App password or access token with permission to read repositories
   bitbucket:
